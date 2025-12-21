@@ -29,15 +29,16 @@ if not TRAIN_DIR.exists() or not VAL_DIR.exists():
         "Expected archive/train and archive/test directories next to the project root."
     )
 
-# Data Augmentation cho training - giúp model học tốt hơn
+# Data Augmentation cho training - giúp model học tốt hơn và chính xác hơn
 train_datagen = ImageDataGenerator(
     rescale=1.0 / 255,
-    rotation_range=15,          # Xoay ảnh ±15 độ
-    width_shift_range=0.1,      # Dịch ngang 10%
-    height_shift_range=0.1,     # Dịch dọc 10%
-    shear_range=0.1,            # Biến dạng
-    zoom_range=0.1,             # Zoom ±10%
+    rotation_range=20,          # Tăng lên ±20 độ để học tốt hơn với góc nghiêng
+    width_shift_range=0.15,     # Tăng lên 15% để học tốt hơn với vị trí
+    height_shift_range=0.15,    # Tăng lên 15%
+    shear_range=0.15,           # Tăng lên 15% để học tốt hơn với biến dạng
+    zoom_range=0.15,            # Tăng lên 15% để học tốt hơn với khoảng cách
     horizontal_flip=True,       # Lật ngang
+    brightness_range=[0.8, 1.2], # Thay đổi độ sáng để học tốt hơn với ánh sáng khác nhau
     fill_mode='nearest'         # Điền pixel khi transform
 )
 
@@ -60,10 +61,10 @@ validation_generator = val_datagen.flow_from_directory(
     class_mode="categorical",
 )
 
-# Model architecture được cải thiện với BatchNormalization
+# Model architecture được cải thiện với BatchNormalization và tối ưu hơn
 emotion_model = Sequential(
     [
-        # Block 1
+        # Block 1 - Tăng số filters để học tốt hơn
         Conv2D(32, kernel_size=(3, 3), activation="relu", input_shape=(IMG_SIZE[0], IMG_SIZE[1], 1)),
         BatchNormalization(),
         Conv2D(64, kernel_size=(3, 3), activation="relu"),
@@ -71,22 +72,23 @@ emotion_model = Sequential(
         MaxPooling2D(pool_size=(2, 2)),
         Dropout(0.25),
         
-        # Block 2
+        # Block 2 - Thêm một Conv layer để tăng capacity
         Conv2D(128, kernel_size=(3, 3), activation="relu"),
         BatchNormalization(),
-        MaxPooling2D(pool_size=(2, 2)),
         Conv2D(128, kernel_size=(3, 3), activation="relu"),
         BatchNormalization(),
         MaxPooling2D(pool_size=(2, 2)),
         Dropout(0.25),
         
-        # Block 3 - Thêm một layer để tăng capacity
+        # Block 3 - Tăng filters và thêm layer
+        Conv2D(256, kernel_size=(3, 3), activation="relu"),
+        BatchNormalization(),
         Conv2D(256, kernel_size=(3, 3), activation="relu"),
         BatchNormalization(),
         MaxPooling2D(pool_size=(2, 2)),
         Dropout(0.25),
         
-        # Dense layers
+        # Dense layers - Tối ưu số lượng neurons
         Flatten(),
         Dense(1024, activation="relu"),
         BatchNormalization(),
@@ -100,10 +102,10 @@ emotion_model = Sequential(
 
 cv2.ocl.setUseOpenCL(False)
 
-# Compile với learning rate cao hơn một chút
+# Compile với learning rate được tối ưu
 emotion_model.compile(
     loss="categorical_crossentropy",
-    optimizer=Adam(learning_rate=2e-4),  # Tăng learning rate
+    optimizer=Adam(learning_rate=1e-3, beta_1=0.9, beta_2=0.999),  # Learning rate cao hơn cho training ban đầu
     metrics=["accuracy"],
 )
 
@@ -119,14 +121,15 @@ print(f"  Total training samples: {train_generator.samples}")
 print(f"  Total validation samples: {validation_generator.samples}")
 print(f"{'='*50}\n")
 
-# Callbacks để cải thiện training
+# Callbacks để cải thiện training - tối ưu hơn
 callbacks = [
-    # Dừng sớm nếu không cải thiện
+    # Dừng sớm nếu không cải thiện - tăng patience để học tốt hơn
     EarlyStopping(
         monitor='val_accuracy',
-        patience=10,
+        patience=15,  # Tăng từ 10 lên 15 để cho model học lâu hơn
         restore_best_weights=True,
-        verbose=1
+        verbose=1,
+        mode='max'
     ),
     # Lưu model tốt nhất
     ModelCheckpoint(
@@ -134,15 +137,17 @@ callbacks = [
         monitor='val_accuracy',
         save_best_only=True,
         save_weights_only=True,
-        verbose=1
+        verbose=1,
+        mode='max'
     ),
-    # Giảm learning rate nếu không cải thiện
+    # Giảm learning rate nếu không cải thiện - điều chỉnh để tối ưu hơn
     ReduceLROnPlateau(
         monitor='val_loss',
-        factor=0.5,
-        patience=5,
-        min_lr=1e-7,
-        verbose=1
+        factor=0.3,  # Giảm mạnh hơn (từ 0.5 xuống 0.3) để học tốt hơn
+        patience=4,  # Giảm từ 5 xuống 4 để phản ứng nhanh hơn
+        min_lr=1e-6,  # Tăng min_lr từ 1e-7 lên 1e-6
+        verbose=1,
+        mode='min'
     )
 ]
 
