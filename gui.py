@@ -22,7 +22,12 @@ WEIGHTS_PATH = SCRIPT_DIR / "emotion_model.weights.h5"
 # Thử load best model trước, nếu không có thì dùng model thường
 BEST_WEIGHTS_PATH = SCRIPT_DIR / "emotion_model_best.weights.h5"
 CASCADE_PATH = Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"
-EMOJI_DIR = BASE_DIR / "emojis" / "emojis"
+# Thử nhiều đường dẫn có thể cho emojis
+EMOJI_DIR = SCRIPT_DIR / "emojis" / "emojis"
+if not EMOJI_DIR.exists():
+    EMOJI_DIR = BASE_DIR / "emojis" / "emojis"
+if not EMOJI_DIR.exists():
+    EMOJI_DIR = SCRIPT_DIR / "emojis"
 IMG_SIZE = (48, 48)
 
 # Tối ưu hóa: Prediction smoothing và frame skipping
@@ -142,19 +147,19 @@ try:
     emotion_model = create_new_model()
     emotion_model.load_weights(weights_to_load)
     model_version = "NEW"
-    print(f"✓ Successfully loaded NEW model architecture from {weights_to_load}")
+    print(f"[OK] Successfully loaded NEW model architecture from {weights_to_load}")
 except (ValueError, Exception) as e:
-    print(f"✗ Failed to load with NEW architecture: {str(e)[:100]}...")
+    print(f"[FAILED] Failed to load with NEW architecture: {str(e)[:100]}...")
     print(f"Attempting to load with OLD architecture from {weights_to_load}...")
     try:
         emotion_model = create_old_model()
         emotion_model.load_weights(weights_to_load)
         model_version = "OLD"
-        print(f"✓ Successfully loaded OLD model architecture from {weights_to_load}")
-        print("⚠ WARNING: Using OLD model architecture. For better accuracy, please retrain with:")
+        print(f"[OK] Successfully loaded OLD model architecture from {weights_to_load}")
+        print("[WARNING] Using OLD model architecture. For better accuracy, please retrain with:")
         print("   python train.py")
     except Exception as e2:
-        print(f"✗ ERROR: Failed to load model weights: {str(e2)}")
+        print(f"[ERROR] Failed to load model weights: {str(e2)}")
         print("Please check if the weights file is corrupted or run train.py to retrain.")
         exit(1)
 
@@ -182,6 +187,26 @@ emoji_dist = {
     5: EMOJI_DIR / "sad.png",
     6: EMOJI_DIR / "surpriced.png",
 }
+
+# Kiểm tra và in thông tin về emoji paths
+print(f"\n{'='*60}")
+print(f"Emoji directory: {EMOJI_DIR}")
+print(f"Emoji directory exists: {EMOJI_DIR.exists()}")
+if EMOJI_DIR.exists():
+    print(f"Files in emoji directory:")
+    try:
+        for file in EMOJI_DIR.iterdir():
+            print(f"  - {file.name}")
+    except:
+        pass
+print(f"\nChecking emoji files:")
+for idx, path in emoji_dist.items():
+    exists = path.exists()
+    status = "[OK]" if exists else "[MISSING]"
+    print(f"  {emotion_dict[idx]:12s}: {path.name:20s} {status}")
+    if not exists:
+        print(f"    Full path: {path}")
+print(f"{'='*60}\n")
 
 face_detector = cv2.CascadeClassifier(str(CASCADE_PATH))
 cap1 = cv2.VideoCapture(0)
@@ -323,22 +348,50 @@ def show_vid2():
     emotion_index = show_text[0]
     emoji_path = emoji_dist.get(emotion_index)
     if emoji_path and emoji_path.exists():
-        frame2 = cv2.imread(str(emoji_path))
-        frame2 = cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB)
-        img2 = Image.fromarray(frame2)
-        
-        # Resize emoji để vừa với container (250x250 pixels)
-        emoji_size = (250, 250)
-        # Sử dụng LANCZOS resampling cho chất lượng tốt nhất
         try:
-            img2 = img2.resize(emoji_size, Image.Resampling.LANCZOS)
-        except AttributeError:
-            # Fallback cho phiên bản PIL cũ
-            img2 = img2.resize(emoji_size, Image.LANCZOS)
-        
-        imgtk2 = ImageTk.PhotoImage(image=img2)
-        lmain2.imgtk2 = imgtk2
-        lmain2.configure(image=imgtk2)
+            frame2 = cv2.imread(str(emoji_path))
+            if frame2 is not None:
+                frame2 = cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB)
+                img2 = Image.fromarray(frame2)
+                
+                # Lấy kích thước emoji đã được tính toán từ lúc khởi tạo
+                try:
+                    # Ưu tiên dùng kích thước đã lưu trong label
+                    if hasattr(lmain2, 'emoji_size'):
+                        emoji_size_pixels = lmain2.emoji_size
+                    else:
+                        # Nếu không có, tính toán lại từ root window
+                        root.update_idletasks()
+                        root_height = root.winfo_height()
+                        emoji_size_pixels = max(250, int(root_height * 0.35))
+                    
+                    # Đảm bảo kích thước tối thiểu và tối đa
+                    emoji_size_pixels = max(250, min(400, emoji_size_pixels))
+                    emoji_size = (emoji_size_pixels, emoji_size_pixels)
+                except Exception as e:
+                    # Fallback cuối cùng: kích thước cố định lớn
+                    emoji_size = (300, 300)
+                
+                # Resize emoji với kích thước đã tính
+                try:
+                    img2 = img2.resize(emoji_size, Image.Resampling.LANCZOS)
+                except AttributeError:
+                    # Fallback cho phiên bản PIL cũ
+                    img2 = img2.resize(emoji_size, Image.LANCZOS)
+                
+                # Tạo PhotoImage và hiển thị
+                imgtk2 = ImageTk.PhotoImage(image=img2)
+                lmain2.imgtk2 = imgtk2  # Giữ reference để tránh garbage collection
+                lmain2.configure(image=imgtk2)  # Không set width/height, PhotoImage tự có kích thước
+            else:
+                print(f"Warning: Could not load emoji image from {emoji_path}")
+        except Exception as e:
+            print(f"Error loading emoji: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        if emoji_path:
+            print(f"Warning: Emoji file not found: {emoji_path}")
 
     # Cập nhật emotion text với font đẹp hơn (đã được set trong main)
     emotion_name = emotion_dict.get(emotion_index, "Neutral")
@@ -349,7 +402,10 @@ def show_vid2():
 def on_close():
     if cap1.isOpened():
         cap1.release()
-    cv2.destroyAllWindows()
+    try:
+        cv2.destroyAllWindows()
+    except:
+        pass  # Ignore OpenCV window errors on Windows
     root.destroy()
 
 
@@ -368,67 +424,100 @@ if __name__ == "__main__":
     BUTTON_HOVER = "#c73650"  # Darker pink on hover
     
     root["bg"] = BG_COLOR
-    root.title("🎭 Emoji Creator - AI Emotion Detection")
-    root.geometry("1400x900+100+10")
+    root.title("Emoji Creator - AI Emotion Detection")
+    
+    # Tính toán kích thước responsive dựa trên màn hình
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    
+    # Sử dụng 90% màn hình, tối thiểu 800x600
+    window_width = max(800, int(screen_width * 0.9))
+    window_height = max(600, int(screen_height * 0.85))
+    
+    # Căn giữa cửa sổ
+    x = (screen_width - window_width) // 2
+    y = (screen_height - window_height) // 2
+    
+    root.geometry(f"{window_width}x{window_height}+{x}+{y}")
+    root.minsize(800, 600)  # Kích thước tối thiểu
     root.protocol("WM_DELETE_WINDOW", on_close)
     
-    # Tạo frame chính với padding
+    # Tạo frame chính với padding responsive
     main_frame = tk.Frame(root, bg=BG_COLOR)
-    main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+    main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
     
     # Header section với gradient effect (simulated) - căn giữa
     header_frame = tk.Frame(main_frame, bg=SECONDARY_BG, relief=tk.RAISED, bd=2)
-    header_frame.pack(fill=tk.X, pady=(0, 20))
+    header_frame.pack(fill=tk.X, pady=(0, 10))
+    
+    # Tính toán font size dựa trên kích thước màn hình
+    base_font_size = max(20, int(window_width / 40))
+    sub_font_size = max(12, int(window_width / 80))
     
     # Try to load logo, if not found, create beautiful text heading
     logo_path = SCRIPT_DIR / "logo.png"
     if logo_path.exists():
-        img = ImageTk.PhotoImage(Image.open(str(logo_path)))
-        heading = Label(header_frame, image=img, bg=SECONDARY_BG)
-        heading.pack(pady=15)
+        try:
+            img = ImageTk.PhotoImage(Image.open(str(logo_path)))
+            heading = Label(header_frame, image=img, bg=SECONDARY_BG)
+            heading.pack(pady=8)
+        except:
+            heading = Label(
+                header_frame, 
+                text="Emoji Creator", 
+                font=("Segoe UI", base_font_size, "bold"), 
+                bg=SECONDARY_BG, 
+                fg=TEXT_COLOR
+            )
+            heading.pack(pady=8)
     else:
         # Beautiful text heading với gradient effect (simulated) - căn giữa
         heading = Label(
             header_frame, 
-            text="🎭 Emoji Creator", 
-            font=("Segoe UI", 36, "bold"), 
+            text="Emoji Creator", 
+            font=("Segoe UI", base_font_size, "bold"), 
             bg=SECONDARY_BG, 
             fg=TEXT_COLOR
         )
-        heading.pack(pady=15)
+        heading.pack(pady=8)
     
     heading2 = Label(
         header_frame, 
         text="AI Emotion Detection System", 
-        font=("Segoe UI", 18, "italic"), 
+        font=("Segoe UI", sub_font_size, "italic"), 
         bg=SECONDARY_BG, 
         fg=TEXT_TERTIARY
     )
-    heading2.pack(pady=(0, 15))
+    heading2.pack(pady=(0, 8))
     
-    # Content area với grid layout cân đối
+    # Content area với grid layout cân đối - responsive
     content_frame = tk.Frame(main_frame, bg=BG_COLOR)
-    content_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+    content_frame.pack(fill=tk.BOTH, expand=True, pady=5)
     
-    # Container cho left và right side - căn giữa
-    main_content = tk.Frame(content_frame, bg=BG_COLOR)
-    main_content.pack(expand=True, fill=tk.BOTH)
+    # Sử dụng grid để chia đều không gian
+    content_frame.columnconfigure(0, weight=1, uniform="equal")
+    content_frame.columnconfigure(1, weight=1, uniform="equal")
+    content_frame.rowconfigure(0, weight=1)
     
     # Left side - Video feed với border đẹp
-    left_container = tk.Frame(main_content, bg=BG_COLOR)
-    left_container.pack(side=tk.LEFT, expand=True, fill=tk.BOTH, padx=(0, 15))
+    left_container = tk.Frame(content_frame, bg=BG_COLOR)
+    left_container.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+    left_container.columnconfigure(0, weight=1)
+    left_container.rowconfigure(1, weight=1)
     
-    video_frame = tk.Frame(left_container, bg=BORDER_COLOR, relief=tk.RAISED, bd=3)
-    video_frame.pack(expand=True, fill=tk.BOTH, padx=10, pady=10)
+    video_frame = tk.Frame(left_container, bg=BORDER_COLOR, relief=tk.RAISED, bd=2)
+    video_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+    video_frame.columnconfigure(0, weight=1)
+    video_frame.rowconfigure(1, weight=1)
     
     video_label_frame = tk.Label(
         video_frame, 
-        text="📹 Live Camera Feed", 
-        font=("Segoe UI", 12, "bold"), 
+        text="Live Camera Feed", 
+        font=("Segoe UI", max(10, int(window_width / 120)), "bold"), 
         bg=BORDER_COLOR, 
         fg=TEXT_SECONDARY
     )
-    video_label_frame.pack(pady=8)
+    video_label_frame.grid(row=0, column=0, pady=5)
     
     lmain = tk.Label(
         master=video_frame, 
@@ -436,104 +525,136 @@ if __name__ == "__main__":
         relief=tk.SUNKEN,
         bd=2
     )
-    lmain.pack(padx=10, pady=(0, 10), fill=tk.BOTH, expand=True)
+    lmain.grid(row=1, column=0, padx=5, pady=(0, 5), sticky="nsew")
     
     # Right side - Emotion display
-    right_container = tk.Frame(main_content, bg=BG_COLOR)
-    right_container.pack(side=tk.RIGHT, expand=True, fill=tk.BOTH, padx=(15, 0))
+    right_container = tk.Frame(content_frame, bg=BG_COLOR)
+    right_container.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+    right_container.columnconfigure(0, weight=1)
+    right_container.rowconfigure(1, weight=1)
     
     emotion_frame = tk.Frame(right_container, bg=BG_COLOR)
-    emotion_frame.pack(expand=True, fill=tk.BOTH, padx=10, pady=10)
+    emotion_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+    emotion_frame.columnconfigure(0, weight=1)
     
     # Emotion label với style đẹp - căn giữa
     emotion_label_frame = tk.Frame(emotion_frame, bg=SECONDARY_BG, relief=tk.RAISED, bd=2)
-    emotion_label_frame.pack(fill=tk.X, pady=(0, 15))
+    emotion_label_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
     
+    emotion_title_font_size = max(10, int(window_width / 100))
     emotion_title = tk.Label(
         emotion_label_frame,
-        text="😊 Detected Emotion",
-        font=("Segoe UI", 14, "bold"),
+        text="Detected Emotion",
+        font=("Segoe UI", emotion_title_font_size, "bold"),
         bg=SECONDARY_BG,
         fg=TEXT_COLOR
     )
-    emotion_title.pack(pady=10)
+    emotion_title.pack(pady=5)
     
-    # Emotion name với style lớn và đẹp - căn giữa
+    # Emotion name với style lớn và đẹp - căn giữa, responsive
+    emotion_name_font_size = max(24, int(window_width / 35))
     lmain3 = tk.Label(
         master=emotion_frame, 
         text="Neutral",
-        font=("Segoe UI", 42, "bold"),
+        font=("Segoe UI", emotion_name_font_size, "bold"),
         bg=BG_COLOR,
         fg=TEXT_COLOR,
         relief=tk.RAISED,
-        bd=3,
-        padx=30,
-        pady=15
+        bd=2,
+        padx=15,
+        pady=8
     )
-    lmain3.pack(pady=15)
+    lmain3.grid(row=1, column=0, pady=10, sticky="ew")
     
-    # Emoji display với border đẹp và kích thước cố định - căn giữa
+    # Emoji display với border đẹp và responsive - căn giữa
     emoji_wrapper = tk.Frame(emotion_frame, bg=BG_COLOR)
-    emoji_wrapper.pack(expand=True, fill=tk.BOTH, pady=10)
+    emoji_wrapper.grid(row=2, column=0, sticky="nsew", pady=10)
+    emoji_wrapper.columnconfigure(0, weight=1)
+    emoji_wrapper.rowconfigure(1, weight=1)
     
-    emoji_container = tk.Frame(emoji_wrapper, bg=BORDER_COLOR, relief=tk.RAISED, bd=3)
-    emoji_container.pack(expand=True)  # Căn giữa trong wrapper
+    emoji_container = tk.Frame(emoji_wrapper, bg=BORDER_COLOR, relief=tk.RAISED, bd=2)
+    emoji_container.grid(row=1, column=0, sticky="")
     
+    emoji_label_font_size = max(9, int(window_width / 120))
     emoji_label = tk.Label(
         emoji_container,
-        text="🎭 Emoji Preview",
-        font=("Segoe UI", 12, "bold"),
+        text="Emoji Preview",
+        font=("Segoe UI", emoji_label_font_size, "bold"),
         bg=BORDER_COLOR,
         fg=TEXT_SECONDARY
     )
-    emoji_label.pack(pady=8)
+    emoji_label.pack(pady=5)
     
-    # Label với kích thước cố định để hiển thị emoji đầy đủ
+    # Label với kích thước responsive để hiển thị emoji đầy đủ
+    # Tính toán kích thước emoji dựa trên màn hình (khoảng 30-35% chiều cao, tối thiểu 250px)
+    emoji_size_pixels = max(250, min(400, int(window_height * 0.35)))
+    
+    # Tạo label với kích thước cố định để đảm bảo emoji hiển thị đúng
+    # Sử dụng pixel trực tiếp thông qua image, không dùng width/height của label
     lmain2 = tk.Label(
         master=emoji_container,
         bg="#000000",
         relief=tk.SUNKEN,
         bd=2,
-        width=250,
-        height=250
+        text="Loading emoji...",  # Placeholder text
+        fg="white"
     )
     lmain2.pack(padx=15, pady=(0, 15))
+    # Lưu kích thước emoji để dùng trong show_vid2
+    lmain2.emoji_size = emoji_size_pixels
     
-    # Status bar - căn giữa text
-    status_frame = tk.Frame(main_frame, bg=SECONDARY_BG, relief=tk.SUNKEN, bd=1)
-    status_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(0, 10))
-    
-    status_text = f"✓ Model loaded: {model_version} | Optimizations: Frame skipping, Smoothing, Histogram EQ"
-    status_label = tk.Label(
-        status_frame,
-        text=status_text,
-        font=("Segoe UI", 9),
-        bg=SECONDARY_BG,
-        fg=TEXT_TERTIARY
-    )
-    status_label.pack(padx=10, pady=5)
+    # Load emoji ngay từ đầu để hiển thị
+    try:
+        initial_emoji_path = emoji_dist.get(4)  # Neutral emoji
+        if initial_emoji_path and initial_emoji_path.exists():
+            initial_frame = cv2.imread(str(initial_emoji_path))
+            if initial_frame is not None:
+                initial_frame = cv2.cvtColor(initial_frame, cv2.COLOR_BGR2RGB)
+                initial_img = Image.fromarray(initial_frame)
+                initial_img = initial_img.resize((emoji_size_pixels, emoji_size_pixels), Image.Resampling.LANCZOS)
+                initial_imgtk = ImageTk.PhotoImage(image=initial_img)
+                lmain2.imgtk2 = initial_imgtk
+                lmain2.configure(image=initial_imgtk, text="")
+    except Exception as e:
+        print(f"Could not load initial emoji: {e}")
     
     # Footer với button đẹp - căn giữa
     footer_frame = tk.Frame(main_frame, bg=BG_COLOR)
-    footer_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
+    footer_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(5, 0))
     
-    # Button với style đẹp hơn - căn giữa
+    # Button với style đẹp hơn - căn giữa, responsive
+    button_font_size = max(12, int(window_width / 90))
     quit_button = tk.Button(
         footer_frame,
-        text="❌ Quit Application",
+        text="Quit Application",
         command=on_close,
-        font=("Segoe UI", 16, "bold"),
+        font=("Segoe UI", button_font_size, "bold"),
         bg=BUTTON_BG,
         fg=TEXT_SECONDARY,
         activebackground=BUTTON_HOVER,
         activeforeground=TEXT_SECONDARY,
         relief=tk.RAISED,
-        bd=3,
-        padx=30,
-        pady=10,
+        bd=2,
+        padx=20,
+        pady=8,
         cursor="hand2"
     )
-    quit_button.pack(pady=10)
+    quit_button.pack(pady=5)
+    
+    # Status bar - căn giữa text
+    status_frame = tk.Frame(main_frame, bg=SECONDARY_BG, relief=tk.SUNKEN, bd=1)
+    status_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(0, 5))
+    
+    status_text = f"Model loaded: {model_version} | Optimizations: Frame skipping, Smoothing, Histogram EQ"
+    status_font_size = max(8, int(window_width / 150))
+    status_label = tk.Label(
+        status_frame,
+        text=status_text,
+        font=("Segoe UI", status_font_size),
+        bg=SECONDARY_BG,
+        fg=TEXT_TERTIARY
+    )
+    status_label.pack(padx=5, pady=3)
     
     show_vid()
     show_vid2()
